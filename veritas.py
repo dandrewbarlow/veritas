@@ -5,40 +5,65 @@ Andrew Barlow
 veritas.py
 
 Description:
-Veritas is a program to fetch inspirational quotes a la `fortune`, only from
-Christian (or predefined) sources. Scrapes quotes from Goodreads.
+Veritas is a program to fetch inspirational quotes a la `fortune` from a list
+of authors. Store authors in "author_list.txt". Scrapes quotes from Goodreads.
 '''
 
 # LIBRARIES ==================================================
 
+import argparse
 import bs4
+import os
 import random
 import re
 import requests
 import socket
 
+# rich fancy output
+from rich.console import Console
+from rich.padding import Padding
+from rich.progress import track
+from rich.text import Text
+
 # GLOBALS ==================================================
 
 base_url = "https://goodreads.com/search?q="
 
-authors = [
-        'Seraphim Rose',
-        'G.K. Chesterton',
-        'C.S. Lewis',
-        'St. Maximus the Confessor',
-        'St. Augustine',
-        'Pope Benedict XVI',
-        'Origen',
-        'Gregory of Nyssa',
-        'St. John of the Cross',
-        'Thomas Merton',
-        'Hildegard of Bingen',
-        'Meister Eckhart',
-        'Catherine of Siena',
-        'Isidore of Seville',
-        'Thomas Aquinas',
-        'Basil the Great'
-        ]
+# Var to store authors
+authors = []
+
+# use stupid os library to get source file path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# filepaths for external files
+author_file = f'{script_dir}/author_list.txt'
+cache_file = f'{script_dir}/cache.txt'
+
+# INIT ==================================================
+
+# rich modules
+console = Console()
+
+# import author list
+with open(author_file, "r") as file:
+
+    author_list = file.readlines()
+    # strip newlines
+    for author in author_list:
+        authors.append(author.strip())
+
+# ARGUMENT PARSING ==================================================
+
+parser = argparse.ArgumentParser(
+        prog="Veritas",
+        description="A font of truth"
+    )
+
+parser.add_argument("-c", "--cache", help="get quote from cache", action="store_true")
+parser.add_argument("-r", "--random", help="get random quote", action="store_true")
+parser.add_argument("-u", "--update", help="update cache", action="store_true")
+
+args = parser.parse_args()
 
 # FUNCTIONS ==================================================
 
@@ -93,19 +118,9 @@ def request_author_quotes(author):
     # loop through quotes
     for quote in quotes:
 
-        # get author field from the scraped quote
-        quote_author_field = quote.select_one('.authorOrTitle')
-
-        # move on if empty
-        if quote_author_field is None:
-            continue
-
-        # check if quote is attributed to author 
-        # bc somehow that isn't part of goodreads' algorithm :/
-        veri = re.search(author, quote_author_field.getText(), re.IGNORECASE)
-
-        # if no match, skip this quote
-        if veri is None:
+        # when an author can't be verified skip to the next quote
+        if verify_author(quote, author) is False:
+            # print(quote)
             continue
 
         # format quote
@@ -116,6 +131,22 @@ def request_author_quotes(author):
 
     return results
 
+
+# update_cache() fetches all quotes from all sources, and saves them to a txt
+# file, separated with line breaks
+def update_cache():
+
+    quotes = get_all_quotes()
+
+    with open(cache_file, 'w') as file:
+
+        # pythonic mass exodus of data into the holy standard of a txt file
+        # with newline separation
+        file.writelines(q + '\n' for q in quotes)
+
+    print(f'Cache saved to {cache_file}')
+
+
 # HELPER FUNCTIONS ==================================================
 
 # format_author(author) takes a string representation of an author and returns
@@ -123,17 +154,45 @@ def request_author_quotes(author):
 def format_author(author):
     return author.replace(' ', '+')
 
+# verify_author(quote_tag, author) takes a BS4 quote tag and string of an
+# author's name, and returns a bool saying whether that name was found in the
+# tag
+def verify_author(quote_tag, author):
+
+    # get author field from the scraped quote
+    quote_author_field = quote_tag.select_one('.authorOrTitle')
+
+    # move on if empty
+    if quote_author_field is None:
+        return False
+
+    # check if quote is attributed to author 
+    # bc somehow that isn't part of goodreads' algorithm :/
+    veri = re.search(author, quote_author_field.getText(), re.IGNORECASE)
+
+    # if no match, skip this quote
+    if veri is None:
+        return False
+    else:
+        return True
+
 # get_random_quote() picks a random author, fetches their quotes, and returns a random one
 def get_random_quote():
     author = random.choice(authors)
     quotes = request_author_quotes(author)
     return random.choice(quotes)
     
+# TODO find way to read random line w/o reading file into memory
+def get_quote_from_cache():
+    return random.choice(list(open(cache_file))).strip()
+
 # get_all_quotes() fetches and returns all quotes by all authors, may be used
 # later for caching/de-networking
 def get_all_quotes():
     quotes = []
-    for author in authors:
+
+    # show progress bar for downloading status
+    for author in track(authors, description="Downloading quotes"):
         for quote in request_author_quotes(author):
             quotes.append(quote)
 
@@ -151,6 +210,25 @@ def format_quote(quote):
 
     return formatted_quote
 
+def print_quote(quote_string):
+
+    # separate quote from the author tag
+    # goodreads uses one of those weird unicode lookalike hyphens
+    quote_array = quote_string.split("—")
+
+    # some quotes have hyphens inside them, we only want it to find the author, so we rejoin the rest
+    if len(quote_array) > 2:
+        while len(quote_array) > 2:
+            quote_array[0] += "-" + quote_array.pop(1)
+
+    rich_quote = Text("")
+
+    rich_quote.append(quote_array[0] + '\n', style="bold")
+    rich_quote.append("\n\t- " + quote_array[1], style="italic")
+
+    padding = Padding(rich_quote, 1)
+    console.print(padding)
+
 # isConnected() creates a socket and initiates a connection to goodreads to
 # test connection
 # https://stackoverflow.com/questions/20913412/test-if-an-internet-connection-is-present-in-python
@@ -166,9 +244,9 @@ def isConnected():
         pass
     return False
 
-# init() is a helper function to mainly avoid dumb mistakes, ala making a
+# checkInternet() is a helper function to mainly avoid dumb mistakes, ala making a
 # request w/o a internet connection
-def init():
+def checkInternet():
     if not isConnected():
         print("Error: no connection")
         exit()
@@ -176,6 +254,14 @@ def init():
 # MAIN ==================================================
 
 if __name__ == "__main__":
-    init()
-    print(get_random_quote())
+    print(authors)
+    exit()
+    if args.cache:
+        print_quote(get_quote_from_cache())
+    elif args.update:
+        checkInternet()
+        update_cache()
+    elif args.random:
+        checkInternet()
+        print_quote(get_random_quote())
 
