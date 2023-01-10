@@ -254,8 +254,6 @@ def checkInternet():
 # MAIN ==================================================
 
 if __name__ == "__main__":
-    print(authors)
-    exit()
     if args.cache:
         print_quote(get_quote_from_cache())
     elif args.update:
