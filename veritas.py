@@ -36,8 +36,8 @@ authors = []
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # filepaths for external files
-author_file = f'{script_dir}/author_list.txt'
-cache_file = f'{script_dir}/cache.txt'
+author_file = f'{script_dir}/author_list.cache'
+cache_file = f'{script_dir}/cache.cache'
 
 # INIT ==================================================
 
